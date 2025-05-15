@@ -1,38 +1,41 @@
 name: Build AutoFlip macOS-arm64
 
 on:
-  workflow_dispatch:          # manual trigger
+  workflow_dispatch:
   push:
     paths: [".github/workflows/build_autoflip.yml"]
 
 jobs:
   build:
-    runs-on: macos-14         # Apple-silicon runner (has full Xcode)
+    runs-on: macos-14
     steps:
     - uses: actions/checkout@v4
 
     - name: Install deps
       run: brew install bazelisk opencv ffmpeg pkg-config
 
-    - name: Patch for Homebrew OpenCV + CoreFoundation
+    - name: Reset + patch for Homebrew OpenCV & CoreFoundation
       run: |
+        # -- Homebrew OpenCV path fixes --
         sed -i '' 's#/usr/local#/opt/homebrew/Cellar#g' WORKSPACE
         OPENCV_VER=$(ls $(brew --cellar opencv) | sort -V | tail -1)
         OPENCV_BUILD=third_party/opencv_macos.BUILD
         sed -i '' "s#^PREFIX = .*#PREFIX = \"opencv/${OPENCV_VER}\"#" $OPENCV_BUILD
         sed -i '' "s#include/opencv2#include/opencv4/opencv2#g"        $OPENCV_BUILD
         sed -i '' "s#paths.join(PREFIX, \"include/\")#paths.join(PREFIX, \"include/opencv4\")#" $OPENCV_BUILD
-        PATCH=mediapipe/framework/port/BUILD
-        grep -q CoreFoundation $PATCH || \
+
+        # -- CoreFoundation link fix (clean slate) --
+        git checkout -- mediapipe/framework/port/BUILD   # restore original file
+        # add the linkopts block exactly once
         sed -i '' '/deps = \[/a\
         \    linkopts = select({\
-        \      "//mediapipe:macos": ["-framework", "CoreFoundation"],\
-        \      "//conditions:default": [],\
+        \        "//mediapipe:macos": ["-framework", "CoreFoundation"],\
+        \        "//conditions:default": []\
         \    }),\
-        ' $PATCH
+        ' mediapipe/framework/port/BUILD
 
     - name: Build AutoFlip
-      env: { HERMETIC_PYTHON_VERSION: "3.12" }   # 👈 pin Python for TF-Lite
+      env: { HERMETIC_PYTHON_VERSION: "3.12" }
       run: |
         bazelisk build -c opt --define MEDIAPIPE_DISABLE_GPU=1 \
           --cpu=darwin_arm64 \
