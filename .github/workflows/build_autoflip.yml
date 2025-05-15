@@ -1,24 +1,25 @@
 name: Build AutoFlip macOS-arm64
 
 on:
-  workflow_dispatch:   # run it manually
+  workflow_dispatch:          # manual trigger
   push:
     paths: [".github/workflows/build_autoflip.yml"]
 
 jobs:
   build:
-    runs-on: macos-14 # Apple-silicon runner with Xcode 15
+    runs-on: macos-14         # Apple-silicon runner (has full Xcode)
     steps:
     - uses: actions/checkout@v4
-    - name: Install Homebrew dependencies
-      run: |
-        brew install bazelisk opencv ffmpeg pkg-config
-    - name: Patch OpenCV path for Homebrew
+
+    - name: Install deps
+      run: brew install bazelisk opencv ffmpeg pkg-config
+
+    - name: Patch for Homebrew OpenCV + CoreFoundation
       run: |
         sed -i '' 's#/usr/local#/opt/homebrew/Cellar#g' WORKSPACE
         OPENCV_VER=$(ls $(brew --cellar opencv) | sort -V | tail -1)
         OPENCV_BUILD=third_party/opencv_macos.BUILD
-        sed -i '' "s#^PREFIX = .*#PREFIX = \"opencv/${OPENCV_VER}\"#"  $OPENCV_BUILD
+        sed -i '' "s#^PREFIX = .*#PREFIX = \"opencv/${OPENCV_VER}\"#" $OPENCV_BUILD
         sed -i '' "s#include/opencv2#include/opencv4/opencv2#g"        $OPENCV_BUILD
         sed -i '' "s#paths.join(PREFIX, \"include/\")#paths.join(PREFIX, \"include/opencv4\")#" $OPENCV_BUILD
         PATCH=mediapipe/framework/port/BUILD
@@ -29,10 +30,14 @@ jobs:
         \      "//conditions:default": [],\
         \    }),\
         ' $PATCH
+
     - name: Build AutoFlip
+      env: { HERMETIC_PYTHON_VERSION: "3.12" }   # 👈 pin Python for TF-Lite
       run: |
         bazelisk build -c opt --define MEDIAPIPE_DISABLE_GPU=1 \
-          --cpu=darwin_arm64 mediapipe/examples/desktop/autoflip:run_autoflip
+          --cpu=darwin_arm64 \
+          mediapipe/examples/desktop/autoflip:run_autoflip
+
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
